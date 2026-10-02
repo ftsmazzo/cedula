@@ -65,6 +65,8 @@ async function preparar() {
   await pool.query(`alter table alteracoes add column if not exists captacao_id text`);
   await pool.query(`create index if not exists cedulas_captacao_idx on cedulas (captacao_id)`);
   await pool.query(`create index if not exists alteracoes_captacao_idx on alteracoes (captacao_id)`);
+  await pool.query(`create index if not exists cedulas_ip_idx on cedulas (ip)`);
+  await pool.query(`create index if not exists alteracoes_ip_idx on alteracoes (ip)`);
   await pool.query(`
     create table if not exists captacoes (
       id text primary key,
@@ -213,16 +215,26 @@ async function painel(url, captacaoId = "") {
   const grupo = cargo
     ? `${where ? `${where} and` : "where"} chave = $${valores.length}`
     : where;
+  const pessoa = `coalesce(nullif(ip, ''), id), coalesce(captacao_id, '')`;
   const [total, porUf, porCidade, porCargo, linhas, alteracoes, meta] = await Promise.all([
-    pool.query(`select count(*)::int as n from cedulas ${where}`, valores),
-    pool.query(`select uf, count(*)::int as n from cedulas ${where} group by uf order by n desc`, valores),
     pool.query(
-      `select coalesce(nullif(cidade, ''), 'Sem cidade') as cidade, coalesce(uf_ip, '') as uf_ip, count(*)::int as n
+      `select count(*)::int as n from (select distinct ${pessoa} from cedulas ${where}) pessoas`,
+      valores,
+    ),
+    pool.query(
+      `select uf, count(distinct (coalesce(nullif(ip, ''), id), coalesce(captacao_id, '')))::int as n
+       from cedulas ${where} group by uf order by n desc`,
+      valores,
+    ),
+    pool.query(
+      `select coalesce(nullif(cidade, ''), 'Sem cidade') as cidade, coalesce(uf_ip, '') as uf_ip,
+              count(distinct (coalesce(nullif(ip, ''), id), coalesce(captacao_id, '')))::int as n
        from cedulas ${where} group by 1, 2 order by n desc limit 30`,
       valores,
     ),
     pool.query(
-      `select chave as cargo, item->>'n' as n, item->>'nome' as nome, item->>'partido' as partido, item->>'tipo' as tipo, count(*)::int as votos
+      `select chave as cargo, item->>'n' as n, item->>'nome' as nome, item->>'partido' as partido, item->>'tipo' as tipo,
+              count(distinct (coalesce(nullif(ip, ''), id), coalesce(captacao_id, '')))::int as votos
        from cedulas, jsonb_each(escolhas) as par(chave, item)
        ${grupo}
        group by 1, 2, 3, 4, 5
@@ -232,14 +244,24 @@ async function painel(url, captacaoId = "") {
     ),
     pool.query(
       `select id, uf, cidade, uf_ip, ip, escolhas, atualizado_em
-       from cedulas ${where}
+       from (
+         select distinct on (coalesce(nullif(ip, ''), id), coalesce(captacao_id, ''))
+           id, uf, cidade, uf_ip, ip, escolhas, atualizado_em
+         from cedulas ${where}
+         order by coalesce(nullif(ip, ''), id), coalesce(captacao_id, ''), atualizado_em desc
+       ) atuais
        order by atualizado_em desc
        limit 200`,
       valores,
     ),
     pool.query(
       `select id, cedula_id, uf, cidade, uf_ip, ip, escolhas, criado_em
-       from alteracoes ${historico.where}
+       from (
+         select distinct on (coalesce(nullif(ip, ''), cedula_id), coalesce(captacao_id, ''))
+           id, cedula_id, uf, cidade, uf_ip, ip, escolhas, criado_em
+         from alteracoes ${historico.where}
+         order by coalesce(nullif(ip, ''), cedula_id), coalesce(captacao_id, ''), criado_em desc
+       ) ultimas
        order by criado_em desc
        limit 200`,
       historico.valores,
@@ -321,31 +343,74 @@ const servidor = createServer(async (req, res) => {
       const cliente = await pool.connect();
       try {
         await cliente.query("begin");
-        await cliente.query(
-          `insert into alteracoes (cedula_id, uf, escolhas, ip, cidade, uf_ip, captacao_id)
-           select $1, $2, $3::jsonb, $4, $5, $6, $7
-           where not exists (
-             select 1 from cedulas
-             where id = $1
-               and escolhas = $3::jsonb
-               and coalesce(ip, '') = coalesce($4, '')
-               and coalesce(captacao_id, '') = coalesce($7, '')
-           )`,
-          [id, uf, payload, ip, lugar.cidade, lugar.uf, captacaoId],
-        );
-        await cliente.query(
-          `insert into cedulas (id, uf, escolhas, ip, cidade, uf_ip, captacao_id)
-           values ($1, $2, $3::jsonb, $4, $5, $6, $7)
-           on conflict (id) do update set
-             uf = excluded.uf,
-             escolhas = excluded.escolhas,
-             ip = excluded.ip,
-             cidade = excluded.cidade,
-             uf_ip = excluded.uf_ip,
-             captacao_id = excluded.captacao_id,
-             atualizado_em = now()`,
-          [id, uf, payload, ip, lugar.cidade, lugar.uf, captacaoId],
-        );
+        const porIp = ip
+          ? await cliente.query(
+              `select id from cedulas
+               where ip = $1 and coalesce(captacao_id, '') = coalesce($2::text, '')
+               order by atualizado_em desc
+               limit 1`,
+              [ip, captacaoId],
+            )
+          : { rows: [] };
+        const alvo = porIp.rows[0]?.id;
+        if (alvo) {
+          await cliente.query(
+            `update cedulas set uf = $2, escolhas = $3::jsonb, cidade = $4, uf_ip = $5, atualizado_em = now()
+             where id = $1`,
+            [alvo, uf, payload, lugar.cidade, lugar.uf],
+          );
+          const historicoIp = await cliente.query(
+            `select id from alteracoes
+             where ip = $1 and coalesce(captacao_id, '') = coalesce($2::text, '')
+             order by criado_em desc
+             limit 1`,
+            [ip, captacaoId],
+          );
+          const linhaHist = historicoIp.rows[0]?.id;
+          if (linhaHist) {
+            await cliente.query(
+              `update alteracoes
+               set cedula_id = $2, uf = $3, escolhas = $4::jsonb, cidade = $5, uf_ip = $6, criado_em = now()
+               where id = $1`,
+              [linhaHist, alvo, uf, payload, lugar.cidade, lugar.uf],
+            );
+            await cliente.query(
+              `delete from alteracoes
+               where ip = $1 and coalesce(captacao_id, '') = coalesce($2::text, '') and id <> $3`,
+              [ip, captacaoId, linhaHist],
+            );
+          } else {
+            await cliente.query(
+              `insert into alteracoes (cedula_id, uf, escolhas, ip, cidade, uf_ip, captacao_id)
+               values ($1, $2, $3::jsonb, $4, $5, $6, $7)`,
+              [alvo, uf, payload, ip, lugar.cidade, lugar.uf, captacaoId],
+            );
+          }
+          await cliente.query(
+            `delete from cedulas
+             where ip = $1 and coalesce(captacao_id, '') = coalesce($2::text, '') and id <> $3`,
+            [ip, captacaoId, alvo],
+          );
+        } else {
+          const ocupado = await cliente.query(`select ip from cedulas where id = $1`, [id]);
+          const idNovo = ocupado.rows[0]?.ip && ocupado.rows[0].ip !== ip ? `${id}-${codigo()}` : id;
+          await cliente.query(
+            `insert into cedulas (id, uf, escolhas, ip, cidade, uf_ip, captacao_id)
+             values ($1, $2, $3::jsonb, $4, $5, $6, $7)
+             on conflict (id) do update set
+               uf = excluded.uf,
+               escolhas = excluded.escolhas,
+               cidade = excluded.cidade,
+               uf_ip = excluded.uf_ip,
+               atualizado_em = now()`,
+            [idNovo, uf, payload, ip, lugar.cidade, lugar.uf, captacaoId],
+          );
+          await cliente.query(
+            `insert into alteracoes (cedula_id, uf, escolhas, ip, cidade, uf_ip, captacao_id)
+             values ($1, $2, $3::jsonb, $4, $5, $6, $7)`,
+            [idNovo, uf, payload, ip, lugar.cidade, lugar.uf, captacaoId],
+          );
+        }
         await cliente.query("commit");
       } catch (erro) {
         await cliente.query("rollback");

@@ -359,7 +359,7 @@ export function Painel() {
               </table>
             </div>
             <h2 className="secao">Alterações</h2>
-            <p className="miudo">Cada mudança de voto fica guardada, também quando o IP muda ou quando o acesso gera uma cédula nova.</p>
+            <p className="miudo">Cada IP é uma linha. O próximo preenchimento ou a próxima troca de voto atualiza essa linha. Um IP novo abre outra.</p>
             <div className="tabela-rolagem">
               <table>
                 <thead>
