@@ -47,6 +47,26 @@ async function preparar() {
   `);
   await pool.query(`create index if not exists cedulas_uf_idx on cedulas (uf)`);
   await pool.query(`create index if not exists cedulas_atualizado_idx on cedulas (atualizado_em desc)`);
+  await pool.query(`
+    create table if not exists alteracoes (
+      id bigserial primary key,
+      cedula_id text not null,
+      uf text not null,
+      escolhas jsonb not null,
+      ip text,
+      cidade text,
+      uf_ip text,
+      criado_em timestamptz not null default now()
+    )
+  `);
+  await pool.query(`create index if not exists alteracoes_criado_idx on alteracoes (criado_em desc)`);
+  await pool.query(`create index if not exists alteracoes_cedula_idx on alteracoes (cedula_id)`);
+  await pool.query(`
+    insert into alteracoes (cedula_id, uf, escolhas, ip, cidade, uf_ip, criado_em)
+    select c.id, c.uf, c.escolhas, c.ip, c.cidade, c.uf_ip, c.atualizado_em
+    from cedulas c
+    where not exists (select 1 from alteracoes a where a.cedula_id = c.id)
+  `);
 }
 
 function json(res, status, corpo) {
@@ -142,7 +162,7 @@ function autorizado(req) {
   return timingSafeEqual(Buffer.from(token), Buffer.from(esperado));
 }
 
-function filtrosDe(url) {
+function filtrosDe(url, instante) {
   const uf = (url.searchParams.get("uf") || "").toUpperCase();
   const cidade = (url.searchParams.get("cidade") || "").trim().slice(0, 80);
   const cargo = url.searchParams.get("cargo") || "";
@@ -164,21 +184,22 @@ function filtrosDe(url) {
   }
   if (/^\d{4}-\d{2}-\d{2}$/.test(de)) {
     valores.push(de);
-    where.push(`atualizado_em >= $${valores.length}::date`);
+    where.push(`${instante} >= $${valores.length}::date`);
   }
   if (/^\d{4}-\d{2}-\d{2}$/.test(ate)) {
     valores.push(ate);
-    where.push(`atualizado_em < ($${valores.length}::date + interval '1 day')`);
+    where.push(`${instante} < ($${valores.length}::date + interval '1 day')`);
   }
   return { where: where.length ? `where ${where.join(" and ")}` : "", valores, cargo };
 }
 
 async function painel(url) {
-  const { where, valores, cargo } = filtrosDe(url);
+  const { where, valores, cargo } = filtrosDe(url, "atualizado_em");
+  const historico = filtrosDe(url, "criado_em");
   const grupo = cargo
     ? `${where ? `${where} and` : "where"} chave = $${valores.length}`
     : where;
-  const [total, porUf, porCidade, porCargo, linhas] = await Promise.all([
+  const [total, porUf, porCidade, porCargo, linhas, alteracoes] = await Promise.all([
     pool.query(`select count(*)::int as n from cedulas ${where}`, valores),
     pool.query(`select uf, count(*)::int as n from cedulas ${where} group by uf order by n desc`, valores),
     pool.query(
@@ -202,6 +223,13 @@ async function painel(url) {
        limit 200`,
       valores,
     ),
+    pool.query(
+      `select id, cedula_id, uf, cidade, uf_ip, ip, escolhas, criado_em
+       from alteracoes ${historico.where}
+       order by criado_em desc
+       limit 200`,
+      historico.valores,
+    ),
   ]);
   return {
     total: total.rows[0].n,
@@ -209,6 +237,7 @@ async function painel(url) {
     porCidade: porCidade.rows,
     porCargo: porCargo.rows,
     linhas: linhas.rows,
+    alteracoes: alteracoes.rows,
   };
 }
 
@@ -236,20 +265,42 @@ const servidor = createServer(async (req, res) => {
       if (!/^[a-zA-Z0-9-]{8,80}$/.test(id) || !UFS.has(uf) || !escolhas) {
         return json(res, 400, { ok: false });
       }
-      const ip = ipDe(req);
+      const ip = ipDe(req).slice(0, 64);
       const lugar = await localizar(ip);
-      await pool.query(
-        `insert into cedulas (id, uf, escolhas, ip, cidade, uf_ip)
-         values ($1, $2, $3::jsonb, $4, $5, $6)
-         on conflict (id) do update set
-           uf = excluded.uf,
-           escolhas = excluded.escolhas,
-           ip = excluded.ip,
-           cidade = excluded.cidade,
-           uf_ip = excluded.uf_ip,
-           atualizado_em = now()`,
-        [id, uf, JSON.stringify(escolhas), ip.slice(0, 64), lugar.cidade, lugar.uf],
-      );
+      const payload = JSON.stringify(escolhas);
+      const cliente = await pool.connect();
+      try {
+        await cliente.query("begin");
+        await cliente.query(
+          `insert into alteracoes (cedula_id, uf, escolhas, ip, cidade, uf_ip)
+           select $1, $2, $3::jsonb, $4, $5, $6
+           where not exists (
+             select 1 from cedulas
+             where id = $1
+               and escolhas = $3::jsonb
+               and coalesce(ip, '') = coalesce($4, '')
+           )`,
+          [id, uf, payload, ip, lugar.cidade, lugar.uf],
+        );
+        await cliente.query(
+          `insert into cedulas (id, uf, escolhas, ip, cidade, uf_ip)
+           values ($1, $2, $3::jsonb, $4, $5, $6)
+           on conflict (id) do update set
+             uf = excluded.uf,
+             escolhas = excluded.escolhas,
+             ip = excluded.ip,
+             cidade = excluded.cidade,
+             uf_ip = excluded.uf_ip,
+             atualizado_em = now()`,
+          [id, uf, payload, ip, lugar.cidade, lugar.uf],
+        );
+        await cliente.query("commit");
+      } catch (erro) {
+        await cliente.query("rollback");
+        throw erro;
+      } finally {
+        cliente.release();
+      }
       return json(res, 200, { ok: true });
     }
 

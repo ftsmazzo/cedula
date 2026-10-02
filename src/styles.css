@@ -503,6 +503,7 @@ details summary { cursor: pointer; }
 .painel main { width: min(1200px, 100%); margin: 0 auto; }
 .painel-topo, .painel-login form { display: flex; justify-content: space-between; gap: 12px; align-items: end; }
 .painel h1 { margin: 0; font-size: 32px; letter-spacing: -0.04em; }
+.painel h2.secao { margin: 28px 0 4px; font-size: 18px; }
 .painel-login form, .filtros-painel { display: grid; gap: 8px; margin-top: 16px; }
 .filtros-painel { grid-template-columns: repeat(6, minmax(0, 1fr)); align-items: end; }
 .painel label, .painel-login label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }

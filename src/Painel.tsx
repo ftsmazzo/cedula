@@ -19,6 +19,16 @@ type Resposta = {
     escolhas: Partial<Record<CargoId, EscolhaRegistrada>>;
     atualizado_em: string;
   }[];
+  alteracoes: {
+    id: number;
+    cedula_id: string;
+    uf: string;
+    cidade: string;
+    uf_ip: string;
+    ip: string;
+    escolhas: Partial<Record<CargoId, EscolhaRegistrada>>;
+    criado_em: string;
+  }[];
 };
 
 function hora(valor: string) {
@@ -226,6 +236,39 @@ export function Painel() {
                   {dados.linhas.map((linha) => (
                     <tr key={linha.id}>
                       <td>{hora(linha.atualizado_em)}</td>
+                      <td>{linha.uf}</td>
+                      <td>
+                        {linha.cidade || "—"}
+                        {linha.uf_ip ? ` · ${linha.uf_ip}` : ""}
+                      </td>
+                      <td>{linha.ip}</td>
+                      {CARGOS.map((item) => (
+                        <td key={item.id}>{linhaEscolha(linha.escolhas[item.id])}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <h2 className="secao">Alterações</h2>
+            <p className="miudo">Cada mudança de voto fica guardada, também quando o IP muda ou quando o acesso gera uma cédula nova.</p>
+            <div className="tabela-rolagem">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Quando</th>
+                    <th>Voto</th>
+                    <th>Acesso</th>
+                    <th>IP</th>
+                    {CARGOS.map((item) => (
+                      <th key={item.id}>{tituloCargo(item.id, "SP")}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {dados.alteracoes.map((linha) => (
+                    <tr key={linha.id}>
+                      <td>{hora(linha.criado_em)}</td>
                       <td>{linha.uf}</td>
                       <td>
                         {linha.cidade || "—"}
