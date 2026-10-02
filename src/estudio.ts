@@ -847,19 +847,24 @@ export function gravarVideo(
   canvas.width = 1080;
   canvas.height = 1920;
   const ctx = canvas.getContext("2d");
-  if (!ctx || typeof MediaRecorder === "undefined") return Promise.reject(new Error("video"));
+  const mime = typeof MediaRecorder === "undefined"
+    ? ""
+    : [
+        "video/mp4;codecs=avc1.42E01E",
+        "video/mp4;codecs=avc1.4D401E",
+        "video/mp4;codecs=avc1.640028",
+        "video/mp4",
+      ].find((tipo) => MediaRecorder.isTypeSupported(tipo));
+  if (!ctx || !mime) return Promise.reject(new Error("video"));
   desenhar(ctx, cena, modelo, corId, 0, vazios);
   const stream = canvas.captureStream(30);
-  const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
-    ? "video/webm;codecs=vp9"
-    : "video/webm";
   const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6_000_000 });
   const pedacos: Blob[] = [];
   rec.ondataavailable = (evento) => {
     if (evento.data.size) pedacos.push(evento.data);
   };
   const pronto = new Promise<Blob>((resolve) => {
-    rec.onstop = () => resolve(new Blob(pedacos, { type: "video/webm" }));
+    rec.onstop = () => resolve(new Blob(pedacos, { type: "video/mp4" }));
   });
   rec.start();
   const inicio = performance.now();

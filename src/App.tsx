@@ -679,7 +679,7 @@ function PassarCola({
     setRecorte("");
     try {
       const blob = await gravarVideo(cena, modelo, cor, vazios, (t) => setGerando(`vídeo ${Math.round(t * 100)}%`));
-      baixar(blob, `cedula-${modelo}.webm`);
+      baixar(blob, `cedula-${modelo}.mp4`);
       setRecorte("Vídeo pronto.");
     } catch {
       setRecorte("Este navegador não gravou o vídeo. A imagem continua disponível.");
