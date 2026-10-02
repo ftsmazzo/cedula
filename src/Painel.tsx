@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { CARGOS, UFS, tituloCargo } from "./model";
 import type { CargoId } from "./model";
 import type { EscolhaRegistrada } from "./registro";
@@ -129,6 +129,10 @@ export function Painel() {
     setNomeNova("");
     await carregar(token);
   }
+
+  useEffect(() => {
+    if (token) void carregar(token);
+  }, []);
 
   async function copiar(texto: string, qual: string) {
     await navigator.clipboard.writeText(texto);
