@@ -234,7 +234,9 @@ export function montarLink(uf: string, escolhas: Partial<Record<CargoId, Escolha
     else if (escolha.tipo === "nulo") partes.push(`${cargo.id}=nulo`);
     else partes.push(`${cargo.id}=legenda:${escolha.pn}:${escolha.partido}`);
   }
-  return `${location.origin}${location.pathname}#${partes.join("/")}`;
+  const c = new URLSearchParams(location.search).get("c") || sessionStorage.getItem("cedula:captacao") || "";
+  const busca = /^[A-Za-z0-9_-]{8,40}$/.test(c) ? `?c=${encodeURIComponent(c)}` : "";
+  return `${location.origin}/${busca}#${partes.join("/")}`;
 }
 
 export function lerHash(hash: string): { uf: string; brutos: Partial<Record<CargoId, string>> } | null {

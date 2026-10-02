@@ -32,7 +32,7 @@ import {
   urlPartido,
   type UfArquivo,
 } from "./model";
-import { registrar } from "./registro";
+import { captacaoAtual, registrar } from "./registro";
 
 const CHAVE = "cedula:v1";
 
@@ -55,6 +55,8 @@ export function App() {
   const [estadosAberto, setEstadosAberto] = useState(false);
   const [aviso, setAviso] = useState("");
   const [passar, setPassar] = useState(false);
+  const captacao = captacaoAtual();
+  const chaveLocal = captacao ? `${CHAVE}:${captacao}` : CHAVE;
 
   useEffect(() => {
     if (lerHash(location.hash)) {
@@ -62,7 +64,7 @@ export function App() {
       return;
     }
     try {
-      const bruto = localStorage.getItem(CHAVE);
+      const bruto = localStorage.getItem(chaveLocal);
       if (bruto) {
         const salvo = JSON.parse(bruto) as { uf?: string; escolhas?: Partial<Record<CargoId, Escolha>> };
         if (salvo.uf && UFS.some((u) => u.sigla === salvo.uf)) setUf(salvo.uf);
@@ -72,14 +74,14 @@ export function App() {
       /* aparelho sem storage */
     }
     setPronto(true);
-  }, []);
+  }, [chaveLocal]);
 
   useEffect(() => {
     if (!pronto || pendentes) return;
-    localStorage.setItem(CHAVE, JSON.stringify({ uf, escolhas }));
-    const timer = window.setTimeout(() => registrar(uf, escolhas), 1200);
+    localStorage.setItem(chaveLocal, JSON.stringify({ uf, escolhas }));
+    const timer = window.setTimeout(() => registrar(uf, escolhas, captacao), 1200);
     return () => window.clearTimeout(timer);
-  }, [pronto, pendentes, uf, escolhas]);
+  }, [pronto, pendentes, uf, escolhas, chaveLocal, captacao]);
 
   useEffect(() => {
     let vivo = true;

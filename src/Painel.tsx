@@ -3,7 +3,26 @@ import { CARGOS, UFS, tituloCargo } from "./model";
 import type { CargoId } from "./model";
 import type { EscolhaRegistrada } from "./registro";
 
-const CHAVE = "cedula:painel";
+type Captacao = {
+  id: string;
+  nome: string;
+  senha: string;
+  criado_em: string;
+  n: number;
+};
+
+function idDaRota() {
+  const resto = location.pathname.replace(/^\/painel\/?/, "");
+  return /^[A-Za-z0-9_-]{8,40}$/.test(resto) ? resto : "";
+}
+
+function linkCedula(id: string) {
+  return `${location.origin}/?c=${id}`;
+}
+
+function linkPainel(id: string) {
+  return `${location.origin}/painel/${id}`;
+}
 
 type Resposta = {
   total: number;
@@ -29,6 +48,7 @@ type Resposta = {
     escolhas: Partial<Record<CargoId, EscolhaRegistrada>>;
     criado_em: string;
   }[];
+  captacao: { id: string; nome: string } | null;
 };
 
 function hora(valor: string) {
@@ -44,14 +64,21 @@ function linhaEscolha(item?: EscolhaRegistrada) {
 }
 
 export function Painel() {
-  const [senha, setSenha] = useState(() => sessionStorage.getItem(CHAVE) ?? "");
-  const [token, setToken] = useState(() => sessionStorage.getItem(CHAVE) ?? "");
+  const captacaoId = idDaRota();
+  const central = !captacaoId;
+  const chavePainel = central ? "cedula:painel" : `cedula:painel:${captacaoId}`;
+  const [senha, setSenha] = useState(() => sessionStorage.getItem(chavePainel) ?? "");
+  const [token, setToken] = useState(() => sessionStorage.getItem(chavePainel) ?? "");
   const [uf, setUf] = useState("");
   const [cidade, setCidade] = useState("");
   const [cargo, setCargo] = useState("");
   const [de, setDe] = useState("");
   const [ate, setAte] = useState("");
+  const [filtroCaptacao, setFiltroCaptacao] = useState("");
   const [dados, setDados] = useState<Resposta | null>(null);
+  const [captacoes, setCaptacoes] = useState<Captacao[]>([]);
+  const [nomeNova, setNomeNova] = useState("");
+  const [copiado, setCopiado] = useState("");
   const [erro, setErro] = useState("");
   const [carregando, setCarregando] = useState(false);
 
@@ -64,12 +91,18 @@ export function Painel() {
     if (cargo) params.set("cargo", cargo);
     if (de) params.set("de", de);
     if (ate) params.set("ate", ate);
+    const escopo = captacaoId || filtroCaptacao;
+    if (escopo) params.set("captacao", escopo);
     const resposta = await fetch(`/api/painel?${params}`, {
       headers: { authorization: `Bearer ${chave}` },
     });
+    if (central) {
+      const lista = await fetch("/api/captacoes", { headers: { authorization: `Bearer ${chave}` } });
+      if (lista.ok) setCaptacoes(await lista.json());
+    }
     setCarregando(false);
     if (resposta.status === 401) {
-      sessionStorage.removeItem(CHAVE);
+      sessionStorage.removeItem(chavePainel);
       setToken("");
       setErro("Senha não confere.");
       return;
@@ -81,9 +114,30 @@ export function Painel() {
     setDados(await resposta.json());
   }
 
+  async function gerar(evento: FormEvent) {
+    evento.preventDefault();
+    setErro("");
+    const resposta = await fetch("/api/captacoes", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ nome: nomeNova }),
+    });
+    if (!resposta.ok) {
+      setErro("Não foi possível gerar a captação.");
+      return;
+    }
+    setNomeNova("");
+    await carregar(token);
+  }
+
+  async function copiar(texto: string, qual: string) {
+    await navigator.clipboard.writeText(texto);
+    setCopiado(qual);
+  }
+
   async function entrar(evento: FormEvent) {
     evento.preventDefault();
-    sessionStorage.setItem(CHAVE, senha);
+    sessionStorage.setItem(chavePainel, senha);
     setToken(senha);
     await carregar(senha);
   }
@@ -93,7 +147,7 @@ export function Painel() {
       <div className="pagina">
         <main className="colinha painel-login">
           <p className="marca">Cédula</p>
-          <h1>Painel</h1>
+          <h1>{central ? "Painel central" : "Painel da captação"}</h1>
           <form onSubmit={entrar}>
             <label>
               Senha
@@ -113,12 +167,12 @@ export function Painel() {
         <header className="painel-topo">
           <div>
             <p className="marca">Cédula</p>
-            <h1>Painel</h1>
+            <h1>{central ? "Painel central" : dados?.captacao?.nome || "Painel da captação"}</h1>
           </div>
           <button
             type="button"
             onClick={() => {
-              sessionStorage.removeItem(CHAVE);
+              sessionStorage.removeItem(chavePainel);
               setToken("");
               setDados(null);
             }}
@@ -126,6 +180,43 @@ export function Painel() {
             Sair
           </button>
         </header>
+        {central && (
+          <section className="captacoes">
+            <h2>Captações</h2>
+            <form className="nova-captacao" onSubmit={gerar}>
+              <label>
+                Nome
+                <input
+                  value={nomeNova}
+                  onChange={(e) => setNomeNova(e.target.value)}
+                  placeholder="Interior de São Paulo"
+                  required
+                />
+              </label>
+              <button type="submit">Gerar captação</button>
+            </form>
+            <ul>
+              {captacoes.map((item) => (
+                <li key={item.id}>
+                  <div>
+                    <strong>{item.nome}</strong>
+                    <span>
+                      {item.n} cédulas · senha {item.senha}
+                    </span>
+                  </div>
+                  <div className="links">
+                    <button type="button" onClick={() => copiar(linkCedula(item.id), `cedula-${item.id}`)}>
+                      {copiado === `cedula-${item.id}` ? "Link copiado" : "Copiar cédula"}
+                    </button>
+                    <button type="button" onClick={() => copiar(linkPainel(item.id), `painel-${item.id}`)}>
+                      {copiado === `painel-${item.id}` ? "Link copiado" : "Copiar painel"}
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         <form
           className="filtros-painel"
           onSubmit={(evento) => {
@@ -133,6 +224,19 @@ export function Painel() {
             carregar(token);
           }}
         >
+          {central && (
+            <label>
+              Captação
+              <select value={filtroCaptacao} onChange={(e) => setFiltroCaptacao(e.target.value)}>
+                <option value="">Todas</option>
+                {captacoes.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.nome}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label>
             UF do voto
             <select value={uf} onChange={(e) => setUf(e.target.value)}>

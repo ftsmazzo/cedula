@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { timingSafeEqual } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import pg from "pg";
@@ -61,6 +61,18 @@ async function preparar() {
   `);
   await pool.query(`create index if not exists alteracoes_criado_idx on alteracoes (criado_em desc)`);
   await pool.query(`create index if not exists alteracoes_cedula_idx on alteracoes (cedula_id)`);
+  await pool.query(`alter table cedulas add column if not exists captacao_id text`);
+  await pool.query(`alter table alteracoes add column if not exists captacao_id text`);
+  await pool.query(`create index if not exists cedulas_captacao_idx on cedulas (captacao_id)`);
+  await pool.query(`create index if not exists alteracoes_captacao_idx on alteracoes (captacao_id)`);
+  await pool.query(`
+    create table if not exists captacoes (
+      id text primary key,
+      nome text not null,
+      senha text not null,
+      criado_em timestamptz not null default now()
+    )
+  `);
   await pool.query(`
     insert into alteracoes (cedula_id, uf, escolhas, ip, cidade, uf_ip, criado_em)
     select c.id, c.uf, c.escolhas, c.ip, c.cidade, c.uf_ip, c.atualizado_em
@@ -156,13 +168,11 @@ function escolhasValidas(bruto) {
 
 function autorizado(req) {
   const esperado = process.env.ADMIN_TOKEN || "";
-  const header = String(req.headers.authorization || "");
-  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-  if (!esperado || token.length !== esperado.length) return false;
-  return timingSafeEqual(Buffer.from(token), Buffer.from(esperado));
+  const token = tokenDe(req);
+  return mesmoSegredo(token, esperado);
 }
 
-function filtrosDe(url, instante) {
+function filtrosDe(url, instante, captacaoId = "") {
   const uf = (url.searchParams.get("uf") || "").toUpperCase();
   const cidade = (url.searchParams.get("cidade") || "").trim().slice(0, 80);
   const cargo = url.searchParams.get("cargo") || "";
@@ -182,6 +192,10 @@ function filtrosDe(url, instante) {
     valores.push(cargo);
     where.push(`escolhas ? $${valores.length}`);
   }
+  if (/^[A-Za-z0-9_-]{8,40}$/.test(captacaoId)) {
+    valores.push(captacaoId);
+    where.push(`captacao_id = $${valores.length}`);
+  }
   if (/^\d{4}-\d{2}-\d{2}$/.test(de)) {
     valores.push(de);
     where.push(`${instante} >= $${valores.length}::date`);
@@ -193,13 +207,13 @@ function filtrosDe(url, instante) {
   return { where: where.length ? `where ${where.join(" and ")}` : "", valores, cargo };
 }
 
-async function painel(url) {
-  const { where, valores, cargo } = filtrosDe(url, "atualizado_em");
-  const historico = filtrosDe(url, "criado_em");
+async function painel(url, captacaoId = "") {
+  const { where, valores, cargo } = filtrosDe(url, "atualizado_em", captacaoId);
+  const historico = filtrosDe(url, "criado_em", captacaoId);
   const grupo = cargo
     ? `${where ? `${where} and` : "where"} chave = $${valores.length}`
     : where;
-  const [total, porUf, porCidade, porCargo, linhas, alteracoes] = await Promise.all([
+  const [total, porUf, porCidade, porCargo, linhas, alteracoes, meta] = await Promise.all([
     pool.query(`select count(*)::int as n from cedulas ${where}`, valores),
     pool.query(`select uf, count(*)::int as n from cedulas ${where} group by uf order by n desc`, valores),
     pool.query(
@@ -230,6 +244,9 @@ async function painel(url) {
        limit 200`,
       historico.valores,
     ),
+    captacaoId
+      ? pool.query(`select id, nome from captacoes where id = $1`, [captacaoId])
+      : Promise.resolve({ rows: [] }),
   ]);
   return {
     total: total.rows[0].n,
@@ -238,7 +255,32 @@ async function painel(url) {
     porCargo: porCargo.rows,
     linhas: linhas.rows,
     alteracoes: alteracoes.rows,
+    captacao: meta.rows[0] || null,
   };
+}
+
+function mesmoSegredo(informado, esperado) {
+  const a = Buffer.from(String(informado));
+  const b = Buffer.from(String(esperado));
+  if (!a.length || a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+function tokenDe(req) {
+  const header = String(req.headers.authorization || "");
+  return header.startsWith("Bearer ") ? header.slice(7) : "";
+}
+
+function codigo() {
+  return randomBytes(9).toString("base64url");
+}
+
+async function captacaoAutorizada(id, senha) {
+  if (!/^[A-Za-z0-9_-]{8,40}$/.test(id)) return null;
+  const busca = await pool.query(`select id, nome, senha from captacoes where id = $1`, [id]);
+  const linha = busca.rows[0];
+  if (!linha || !mesmoSegredo(senha, linha.senha)) return null;
+  return linha;
 }
 
 function arquivoDe(url) {
@@ -265,6 +307,14 @@ const servidor = createServer(async (req, res) => {
       if (!/^[a-zA-Z0-9-]{8,80}$/.test(id) || !UFS.has(uf) || !escolhas) {
         return json(res, 400, { ok: false });
       }
+      const captacao = texto(corpo.captacao, 40);
+      let captacaoId = null;
+      if (captacao) {
+        if (!/^[A-Za-z0-9_-]{8,40}$/.test(captacao)) return json(res, 400, { ok: false });
+        const existe = await pool.query(`select 1 from captacoes where id = $1`, [captacao]);
+        if (!existe.rowCount) return json(res, 400, { ok: false });
+        captacaoId = captacao;
+      }
       const ip = ipDe(req).slice(0, 64);
       const lugar = await localizar(ip);
       const payload = JSON.stringify(escolhas);
@@ -272,27 +322,29 @@ const servidor = createServer(async (req, res) => {
       try {
         await cliente.query("begin");
         await cliente.query(
-          `insert into alteracoes (cedula_id, uf, escolhas, ip, cidade, uf_ip)
-           select $1, $2, $3::jsonb, $4, $5, $6
+          `insert into alteracoes (cedula_id, uf, escolhas, ip, cidade, uf_ip, captacao_id)
+           select $1, $2, $3::jsonb, $4, $5, $6, $7
            where not exists (
              select 1 from cedulas
              where id = $1
                and escolhas = $3::jsonb
                and coalesce(ip, '') = coalesce($4, '')
+               and coalesce(captacao_id, '') = coalesce($7, '')
            )`,
-          [id, uf, payload, ip, lugar.cidade, lugar.uf],
+          [id, uf, payload, ip, lugar.cidade, lugar.uf, captacaoId],
         );
         await cliente.query(
-          `insert into cedulas (id, uf, escolhas, ip, cidade, uf_ip)
-           values ($1, $2, $3::jsonb, $4, $5, $6)
+          `insert into cedulas (id, uf, escolhas, ip, cidade, uf_ip, captacao_id)
+           values ($1, $2, $3::jsonb, $4, $5, $6, $7)
            on conflict (id) do update set
              uf = excluded.uf,
              escolhas = excluded.escolhas,
              ip = excluded.ip,
              cidade = excluded.cidade,
              uf_ip = excluded.uf_ip,
+             captacao_id = excluded.captacao_id,
              atualizado_em = now()`,
-          [id, uf, payload, ip, lugar.cidade, lugar.uf],
+          [id, uf, payload, ip, lugar.cidade, lugar.uf, captacaoId],
         );
         await cliente.query("commit");
       } catch (erro) {
@@ -304,11 +356,41 @@ const servidor = createServer(async (req, res) => {
       return json(res, 200, { ok: true });
     }
 
-    if (req.method === "GET" && url.pathname === "/api/painel") {
+    if (req.method === "POST" && url.pathname === "/api/captacoes") {
       if (!process.env.ADMIN_TOKEN) return json(res, 503, { ok: false });
       if (!autorizado(req)) return json(res, 401, { ok: false });
       if (!pool) return json(res, 503, { ok: false });
-      return json(res, 200, await painel(url));
+      const corpo = await lerCorpo(req);
+      const nome = texto(corpo.nome, 80);
+      if (!nome) return json(res, 400, { ok: false });
+      const id = codigo();
+      const senha = codigo();
+      await pool.query(`insert into captacoes (id, nome, senha) values ($1, $2, $3)`, [id, nome, senha]);
+      return json(res, 200, { id, nome, senha });
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/captacoes") {
+      if (!process.env.ADMIN_TOKEN) return json(res, 503, { ok: false });
+      if (!autorizado(req)) return json(res, 401, { ok: false });
+      if (!pool) return json(res, 503, { ok: false });
+      const lista = await pool.query(
+        `select c.id, c.nome, c.senha, c.criado_em, count(d.id)::int as n
+         from captacoes c
+         left join cedulas d on d.captacao_id = c.id
+         group by c.id
+         order by c.criado_em desc`,
+      );
+      return json(res, 200, lista.rows);
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/painel") {
+      if (!process.env.ADMIN_TOKEN) return json(res, 503, { ok: false });
+      if (!pool) return json(res, 503, { ok: false });
+      const pedido = texto(url.searchParams.get("captacao") || "", 40);
+      if (autorizado(req)) return json(res, 200, await painel(url, pedido));
+      const cap = await captacaoAutorizada(pedido, tokenDe(req));
+      if (!cap) return json(res, 401, { ok: false });
+      return json(res, 200, await painel(url, cap.id));
     }
 
     if (url.pathname.startsWith("/midia")) {
