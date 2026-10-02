@@ -58,7 +58,6 @@ export type Cena = {
   estado: string;
   bandeira: ImageBitmap | null;
   linhas: Linha[];
-  link: string;
 };
 
 type Paleta = {
@@ -125,7 +124,6 @@ async function bitmap(url: string) {
 export async function montarCena(
   uf: string,
   escolhas: Partial<Record<CargoId, Escolha>>,
-  link = "",
 ): Promise<Cena> {
   const linhas: Linha[] = [];
   for (const cargo of CARGOS) {
@@ -170,7 +168,6 @@ export async function montarCena(
     estado: nomeUf(uf),
     bandeira: await bitmap(urlBandeira(uf)),
     linhas,
-    link,
   };
 }
 
@@ -225,7 +222,7 @@ function caixa(
   ctx.stroke();
   if (!digito) return;
   ctx.fillStyle = pal.text;
-  ctx.font = `700 ${Math.round(h * 0.58)}px Figtree, sans-serif`;
+  ctx.font = `800 ${Math.round(h * 0.82)}px Figtree, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(digito, x + w / 2, y + h / 2 + h * 0.02);
@@ -326,12 +323,12 @@ export function desenharFolha(
       ctx.restore();
     }
 
-    const cellH = Math.min(Math.round(rowH * 0.34), 78);
-    const cellW = Math.round(cellH * 0.78);
+    const cellH = Math.min(Math.round(rowH * 0.56), 132);
+    const cellW = Math.round(cellH * 0.9);
     const gap = Math.round(cellW * 0.16);
     const cellsW = linha.digitos * cellW + (linha.digitos - 1) * gap;
     const cellsX = (W - cellsW) / 2;
-    const cellsY = y + rowH * 0.34;
+    const cellsY = y + rowH * 0.26;
     ctx.textAlign = "center";
     ctx.fillStyle = pal.muted;
     ctx.font = `700 ${Math.max(13, Math.round(rowH * 0.09))}px Figtree, sans-serif`;
@@ -352,7 +349,7 @@ export function desenharFolha(
         ctx.globalAlpha = rev.nome;
         ctx.fillStyle = pal.text;
         ctx.font = `800 ${Math.max(18, Math.round(rowH * 0.13))}px Figtree, sans-serif`;
-        ctx.fillText(cortar(ctx, linha.nome, cellsW + 80), W / 2, cellsY + cellH + rowH * 0.16);
+        ctx.fillText(cortar(ctx, linha.nome, cellsW + 80), W / 2, cellsY + cellH + rowH * 0.1);
         ctx.restore();
       }
     }
@@ -375,7 +372,7 @@ export function desenharFolha(
   ctx.textAlign = "center";
   ctx.fillStyle = pal.muted;
   ctx.font = "600 20px Figtree, sans-serif";
-  ctx.fillText("Confira o nome e a foto na urna", W / 2, H - (story ? 210 : 118));
+  ctx.fillText("Confira o nome e a foto na urna", W / 2, H - (story ? 150 : 58));
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
@@ -811,46 +808,6 @@ export function desenhar(
   else if (modelo === "outdoor") desenharOutdoor(ctx, cena, t);
   else if (modelo === "manifesto") desenharManifesto(ctx, cena, t);
   else desenharFolha(ctx, cena, corId, t, vazios);
-  desenharLink(ctx, cena);
-}
-
-function desenharLink(ctx: CanvasRenderingContext2D, cena: Cena) {
-  const endereco = cena.link.replace(/^https?:\/\//, "");
-  if (!endereco || ctx.canvas.width < 500) return;
-  const w = ctx.canvas.width;
-  const h = ctx.canvas.height;
-  const max = w - 96;
-  let tamanho = Math.round(w * 0.028);
-  ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  const linhas = () => {
-    ctx.font = `700 ${tamanho}px Figtree, sans-serif`;
-    const corte = endereco.indexOf("#");
-    if (corte > 8 && ctx.measureText(endereco).width > max) {
-      return [endereco.slice(0, corte), endereco.slice(corte)];
-    }
-    return [endereco];
-  };
-  let partes = linhas();
-  while (partes.some((parte) => ctx.measureText(parte).width > max) && tamanho > 16) {
-    tamanho -= 1;
-    partes = linhas();
-  }
-  const altura = tamanho * 1.35;
-  const bloco = partes.length * altura + 18;
-  const y0 = h - bloco - 18;
-  const largura = Math.min(w - 48, Math.max(...partes.map((parte) => ctx.measureText(parte).width)) + 40);
-  ctx.fillStyle = "rgba(0,0,0,0.72)";
-  ctx.beginPath();
-  ctx.roundRect((w - largura) / 2, y0, largura, bloco, 16);
-  ctx.fill();
-  ctx.fillStyle = "#ffffff";
-  partes.forEach((parte, i) => {
-    ctx.fillText(parte, w / 2, y0 + 12 + altura * i + altura / 2);
-  });
-  ctx.restore();
 }
 
 export function duracaoDe(cena: Cena, modelo: ModeloId) {

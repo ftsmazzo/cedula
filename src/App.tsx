@@ -618,13 +618,13 @@ function PassarCola({
 
   useEffect(() => {
     let vivo = true;
-    montarCena(uf, escolhas, link).then((pronta) => {
+    montarCena(uf, escolhas).then((pronta) => {
       if (vivo) setCena(pronta);
     });
     return () => {
       vivo = false;
     };
-  }, [uf, escolhas, link]);
+  }, [uf, escolhas]);
 
   useEffect(() => {
     if (!cena) return;
@@ -660,28 +660,12 @@ function PassarCola({
     return () => cancelAnimationFrame(quadro);
   }, [cena, modo, cor, modelo, vazios]);
 
-  async function entregar(blob: Blob, nome: string) {
-    const arquivo = new File([blob], nome, { type: blob.type || "application/octet-stream" });
-    const textoLink = `Abra a cédula: ${link}`;
-    if (navigator.canShare?.({ files: [arquivo] })) {
-      try {
-        await navigator.share({ files: [arquivo], title: "Cédula", text: textoLink });
-        setRecorte("Na conversa, o link da legenda abre a cédula.");
-        return;
-      } catch (e) {
-        if (e instanceof DOMException && e.name === "AbortError") return;
-      }
-    }
-    baixar(blob, nome);
-    setRecorte("O endereço está na imagem. O clique no post depende da rede.");
-  }
-
   async function imagem() {
     if (!cena) return;
     setGerando("imagem");
     setRecorte("");
     try {
-      await entregar(await imagemParada(cena, cor, vazios), `cedula-${cor}.png`);
+      baixar(await imagemParada(cena, cor, vazios), `cedula-${cor}.png`);
     } catch {
       setRecorte("Não foi possível gerar a imagem.");
     } finally {
@@ -695,7 +679,8 @@ function PassarCola({
     setRecorte("");
     try {
       const blob = await gravarVideo(cena, modelo, cor, vazios, (t) => setGerando(`vídeo ${Math.round(t * 100)}%`));
-      await entregar(blob, `cedula-${modelo}.webm`);
+      baixar(blob, `cedula-${modelo}.webm`);
+      setRecorte("Vídeo pronto.");
     } catch {
       setRecorte("Este navegador não gravou o vídeo. A imagem continua disponível.");
     } finally {
@@ -812,7 +797,7 @@ function PassarCola({
             </p>
             <p className="px">{modo === "imagem" ? "1080 × 1350" : "1080 × 1920"}</p>
             <button type="button" className="principal" disabled={!cena || !!gerando} onClick={modo === "imagem" ? imagem : video}>
-              {gerando.startsWith("vídeo") ? gerando : gerando === "imagem" ? "Gerando…" : modo === "imagem" ? "Compartilhar imagem" : "Compartilhar vídeo"}
+              {gerando.startsWith("vídeo") ? gerando : gerando === "imagem" ? "Gerando…" : modo === "imagem" ? "Baixar imagem" : "Gerar vídeo"}
             </button>
             <div className="grade">
               <button type="button" onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, "_blank", "noopener")}>
@@ -831,7 +816,7 @@ function PassarCola({
           </div>
         </div>
         {recorte && <p className="aviso">{recorte}</p>}
-        <p className="miudo">O endereço vai na imagem e na legenda. No WhatsApp dá para tocar no link. Num post só de foto, a pessoa lê o endereço na peça.</p>
+        <p className="miudo">No celular, a cabine não deixa entrar com o aparelho. Imprima e leve no papel.</p>
       </div>
     </div>
   );
