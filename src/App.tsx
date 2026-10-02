@@ -32,6 +32,7 @@ import {
   urlPartido,
   type UfArquivo,
 } from "./model";
+import { registrar } from "./registro";
 
 const CHAVE = "cedula:v1";
 
@@ -76,6 +77,8 @@ export function App() {
   useEffect(() => {
     if (!pronto || pendentes) return;
     localStorage.setItem(CHAVE, JSON.stringify({ uf, escolhas }));
+    const timer = window.setTimeout(() => registrar(uf, escolhas), 1200);
+    return () => window.clearTimeout(timer);
   }, [pronto, pendentes, uf, escolhas]);
 
   useEffect(() => {
@@ -242,7 +245,7 @@ export function App() {
           </p>
         </header>
 
-        <p className="uma-linha">A foto e o nome, para conferir na urna.</p>
+        <p className="uma-linha">A foto e o nome, para conferir na urna. O preenchimento fica no painel interno, com a cidade aproximada do acesso.</p>
         {carregando && <p className="aviso">Carregando candidaturas…</p>}
         {erro && <p className="aviso erro">{erro}</p>}
         {aviso && <p className="aviso erro">{aviso}</p>}

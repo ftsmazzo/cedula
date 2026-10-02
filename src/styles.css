@@ -499,6 +499,32 @@ details summary { cursor: pointer; }
 
 .miudo { color: var(--muted); font-size: 13px; line-height: 1.4; }
 
+.painel { place-items: start stretch; }
+.painel main { width: min(1200px, 100%); margin: 0 auto; }
+.painel-topo, .painel-login form { display: flex; justify-content: space-between; gap: 12px; align-items: end; }
+.painel h1 { margin: 0; font-size: 32px; letter-spacing: -0.04em; }
+.painel-login form, .filtros-painel { display: grid; gap: 8px; margin-top: 16px; }
+.filtros-painel { grid-template-columns: repeat(6, minmax(0, 1fr)); align-items: end; }
+.painel label, .painel-login label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.painel input, .painel select, .painel-login input, .filtros-painel button, .painel-topo button {
+  border: 1px solid var(--line);
+  background: white;
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: var(--ink);
+}
+.filtros-painel button, .painel-login button { background: var(--ink); color: white; border-color: var(--ink); font-weight: 700; }
+.total { font-size: 22px; font-weight: 700; }
+.blocos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.blocos div { background: white; border-radius: 16px; padding: 12px 14px; }
+.blocos h2 { margin: 0 0 8px; font-size: 14px; }
+.blocos ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.blocos li { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; }
+.tabela-rolagem { overflow: auto; margin-top: 16px; background: white; border-radius: 16px; }
+.painel table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.painel th, .painel td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.painel th { color: var(--muted); font-weight: 600; }
+
 :focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 
 @media (max-width: 640px) {
@@ -509,7 +535,8 @@ details summary { cursor: pointer; }
   .caixa-numero { grid-column: 2 / -1; }
   .lupa { grid-column: 3; grid-row: 1; }
   .retrato, .retrato.oco, .retrato.letra { width: 64px; height: 64px; }
-  .estados, .filtros { grid-template-columns: 1fr; }
+  .estados, .filtros, .filtros-painel, .blocos { grid-template-columns: 1fr; }
+  .painel { padding: 12px; }
   .cortina { align-items: end; padding: 0; }
   .dialog { border-radius: 22px 22px 0 0; }
   .estudio-corpo { grid-template-columns: 1fr; }
