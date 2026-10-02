@@ -421,14 +421,6 @@ const servidor = createServer(async (req, res) => {
       return json(res, 200, { ok: true });
     }
 
-    if (req.method === "POST" && url.pathname === "/api/zerar") {
-      if (!process.env.ADMIN_TOKEN) return json(res, 503, { ok: false });
-      if (!autorizado(req)) return json(res, 401, { ok: false });
-      if (!pool) return json(res, 503, { ok: false });
-      await pool.query(`truncate table alteracoes, cedulas, captacoes restart identity`);
-      return json(res, 200, { ok: true });
-    }
-
     if (req.method === "POST" && url.pathname === "/api/captacoes") {
       if (!process.env.ADMIN_TOKEN) return json(res, 503, { ok: false });
       if (!autorizado(req)) return json(res, 401, { ok: false });

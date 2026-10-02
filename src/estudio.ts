@@ -58,6 +58,7 @@ export type Cena = {
   estado: string;
   bandeira: ImageBitmap | null;
   linhas: Linha[];
+  link: string;
 };
 
 type Paleta = {
@@ -124,6 +125,7 @@ async function bitmap(url: string) {
 export async function montarCena(
   uf: string,
   escolhas: Partial<Record<CargoId, Escolha>>,
+  link = "",
 ): Promise<Cena> {
   const linhas: Linha[] = [];
   for (const cargo of CARGOS) {
@@ -168,6 +170,7 @@ export async function montarCena(
     estado: nomeUf(uf),
     bandeira: await bitmap(urlBandeira(uf)),
     linhas,
+    link,
   };
 }
 
@@ -372,7 +375,7 @@ export function desenharFolha(
   ctx.textAlign = "center";
   ctx.fillStyle = pal.muted;
   ctx.font = "600 20px Figtree, sans-serif";
-  ctx.fillText("Confira o nome e a foto na urna", W / 2, H - (story ? 150 : 58));
+  ctx.fillText("Confira o nome e a foto na urna", W / 2, H - (story ? 210 : 118));
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
@@ -808,6 +811,46 @@ export function desenhar(
   else if (modelo === "outdoor") desenharOutdoor(ctx, cena, t);
   else if (modelo === "manifesto") desenharManifesto(ctx, cena, t);
   else desenharFolha(ctx, cena, corId, t, vazios);
+  desenharLink(ctx, cena);
+}
+
+function desenharLink(ctx: CanvasRenderingContext2D, cena: Cena) {
+  const endereco = cena.link.replace(/^https?:\/\//, "");
+  if (!endereco || ctx.canvas.width < 500) return;
+  const w = ctx.canvas.width;
+  const h = ctx.canvas.height;
+  const max = w - 96;
+  let tamanho = Math.round(w * 0.028);
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const linhas = () => {
+    ctx.font = `700 ${tamanho}px Figtree, sans-serif`;
+    const corte = endereco.indexOf("#");
+    if (corte > 8 && ctx.measureText(endereco).width > max) {
+      return [endereco.slice(0, corte), endereco.slice(corte)];
+    }
+    return [endereco];
+  };
+  let partes = linhas();
+  while (partes.some((parte) => ctx.measureText(parte).width > max) && tamanho > 16) {
+    tamanho -= 1;
+    partes = linhas();
+  }
+  const altura = tamanho * 1.35;
+  const bloco = partes.length * altura + 18;
+  const y0 = h - bloco - 18;
+  const largura = Math.min(w - 48, Math.max(...partes.map((parte) => ctx.measureText(parte).width)) + 40);
+  ctx.fillStyle = "rgba(0,0,0,0.72)";
+  ctx.beginPath();
+  ctx.roundRect((w - largura) / 2, y0, largura, bloco, 16);
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  partes.forEach((parte, i) => {
+    ctx.fillText(parte, w / 2, y0 + 12 + altura * i + altura / 2);
+  });
+  ctx.restore();
 }
 
 export function duracaoDe(cena: Cena, modelo: ModeloId) {
